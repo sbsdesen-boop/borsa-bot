@@ -1,0 +1,29 @@
+name: Borsa Botunu Calistir
+
+on:
+  schedule:
+    # Her gun saat 15:15 UTC (Turkiye saatiyle 18:15) calisir
+    - cron: '15 15 * * 1-5'
+  workflow_dispatch: # Manuel test etmek icin "Run workflow" butonu ekler
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Kopyala
+        uses: actions/checkout@v4
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Kutuphaneleri Yukle
+        run: pip install -r requirements.txt
+
+      - name: Botu Calistir
+        env:
+          # Telegram bilgilerini buraya girmene gerek yok, 
+          # bot.py icinde tanimli oldugu icin direkt calisacak.
+          PYTHONUNBUFFERED: "1"
+        run: python bot.py
