@@ -1,29 +1,40 @@
-name: Borsa Botunu Calistir
+name: Borsa Botu
 
 on:
   schedule:
-    # Her gun saat 15:15 UTC (Turkiye saatiyle 18:15) calisir
-    - cron: '*/30 7-15 * * 1-5'
-  workflow_dispatch: # Manuel test etmek icin "Run workflow" butonu ekler
+    # Her 30 dakikada bir, :05 ve :35'te (UTC 07-15 = TR 10-18), hafta içi
+    - cron: "5,35 7-15 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: borsa-botu
+  cancel-in-progress: false
 
 jobs:
-  run-bot:
+  tara:
     runs-on: ubuntu-latest
     steps:
-      - name: Depoyu Kopyala
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Python Kur
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
-      - name: Kutuphaneleri Yukle
-        run: pip install -r requirements.txt
+      - name: Paketleri kur
+        run: pip install yfinance pandas numpy requests
 
-      - name: Botu Calistir
+      - name: Botu çalıştır
+        run: python borsa_botu.py
         env:
-          # Telegram bilgilerini buraya girmene gerek yok, 
-          # bot.py icinde tanimli oldugu icin direkt calisacak.
-          PYTHONUNBUFFERED: "1"
-        run: python bot.py
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Sinyal logunu kaydet
+        run: |
+          git config user.name "borsa-bot"
+          git config user.email "borsa-bot@users.noreply.github.com"
+          git add signals.csv || true
+          git diff --cached --quiet || (git commit -m "sinyal logu güncellendi" && git push)
