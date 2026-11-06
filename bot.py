@@ -5,43 +5,40 @@ import requests
 from datetime import datetime
 
 # ==================== AYARLAR ====================
-# SENİN VERDİĞİN BİLGİLER (Token'ı yenilediysen burayı güncelle)
+# SENİN VERDİĞİN BİLGİLER
 TELEGRAM_TOKEN = "8976321317:AAE22e1cwXaE67qkgYhaSWec8_RcodGLC6Q"
 TELEGRAM_CHAT_ID = "9083515870"
 
-# MRGYO eklendi, GARAN çıkarıldı
 SEMBOLLER = ["SKTAS.IS", "THYAO.IS", "ASELS.IS", "MRGYO.IS"] 
 
-# Strateji Parametreleri
-FAST_LEN = 9
-SLOW_LEN = 21
-TREND_LEN = 100
+# GÜN İÇİ (INTRADAY) PARAMETRELERİ
+# Daha hızlı tepki verebilmesi için periyotları kısalttık
+FAST_LEN = 5   # 9'dan 5'e düşürüldü
+SLOW_LEN = 13  # 21'den 13'e düşürüldü
+TREND_LEN = 50 # 100'den 50'ye düşürüldü
 RSI_LEN = 14
-RSI_ALT = 45
-RSI_UST = 70
+RSI_ALT = 30   # Aşırı satım
+RSI_UST = 70   # Aşırı alım
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIG = 9
 VOL_LEN = 20
-VOL_MULT = 1.1
+VOL_MULT = 1.2 # Hacim onayı biraz sıkılaştırıldı
 ATR_LEN = 14
 ATR_MULT_SL = 1.5
-RR_ORAN = 2.0
+RR_ORAN = 1.5  # Gün içi hedef (Take Profit) biraz daha yakın tutuldu
 
 # ==================== TELEGRAM BİLDİRİM FONKSİYONU ====================
 def telegram_mesaj_gonder(mesaj):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "HTML"}
     try:
-        response = requests.post(url, data=payload)
-        if response.status_code == 200:
-            print(f"✅ Telegram mesajı gönderildi: {mesaj[:50]}...")
-        else:
-            print(f"❌ Telegram API Hatası: {response.text}")
+        requests.post(url, data=payload)
+        print(f"✅ Telegram mesajı gönderildi.")
     except Exception as e:
-        print(f"❌ Bağlantı Hatası: {e}")
+        print(f"❌ Telegram hatası: {e}")
 
-# ==================== İNDİKATÖR HESAPLAMA FONKSİYONLARI ====================
+# ==================== İNDİKATÖR FONKSİYONLARI ====================
 def hesapla_ema(series, length):
     return series.ewm(span=length, adjust=False).mean()
 
@@ -71,9 +68,10 @@ def hesapla_atr(df, length=14):
 def strateji_kontrol(sembol):
     print(f"🔍 {sembol} kontrol ediliyor...")
     
-    # 1. Veriyi Çek
+    # 1. Veriyi Çek (Son 1 aylık SAATLİK veri)
     try:
-        df = yf.download(sembol, period="1y", interval="1d", progress=False)
+        # interval="1h" ile saatlik veri çekiyoruz
+        df = yf.download(sembol, period="1mo", interval="1h", progress=False)
         if df.empty:
             print(f"⚠️ {sembol} için veri bulunamadı.")
             return
@@ -114,25 +112,20 @@ def strateji_kontrol(sembol):
         tp = round(fiyat + ((fiyat - sl) * RR_ORAN), 2)
         
         mesaj = (
-            f"🚀 <b>{sembol} AL SİNYALİ!</b>\n"
+            f"⚡ <b>{sembol} SAATLİK AL SİNYALİ!</b>\n"
             f"💰 Giriş Fiyatı: {fiyat}\n"
             f"🛑 Stop-Loss: {sl}\n"
             f"🎯 Kâr Al (TP): {tp}\n"
             f"📊 RSI: {round(son_mum['RSI'], 2)}\n"
-            f"📈 Trend: Yukarı (100 SMA Üzeri)\n"
-            f"📅 Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}"
+            f"⏰ Saat: {datetime.now().strftime('%H:%M')}"
         )
         telegram_mesaj_gonder(mesaj)
     else:
-        print(f"ℹ️ {sembol} için AL sinyali yok. Detaylar -> Trend: {trend_yukari}, MACD: {macd_onay}, Hacim: {hacim_onay}, RSI: {rsi_onay}, Kesişim: {ema_kesisim}")
+        print(f"ℹ️ {sembol} için sinyal yok. (Trend: {trend_yukari}, MACD: {macd_onay}, Hacim: {hacim_onay}, RSI: {rsi_onay}, Kesişim: {ema_kesisim})")
 
 # ==================== ÇALIŞTIR ====================
 if __name__ == "__main__":
-    print(f"📅 Tarama Başladı: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
-    
-    # Test mesajı gönderelim (Botun çalıştığını doğrulamak için)
-    telegram_mesaj_gonder("🤖 Test: SKTAS Alarm Botu başarıyla başlatıldı! (GARAN çıkarıldı, MRGYO eklendi)")
-    
+    print(f"📅 Saatlik Tarama Başladı: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
     for sembol in SEMBOLLER:
         strateji_kontrol(sembol)
         print("-" * 40)
