@@ -3,7 +3,7 @@ name: Borsa Botunu Calistir
 on:
   schedule:
     # Her gun saat 15:15 UTC (Turkiye saatiyle 18:15) calisir
-    - cron: '15 15 * * 1-5'
+    - cron: '0 7-15 * * 1-5'
   workflow_dispatch: # Manuel test etmek icin "Run workflow" butonu ekler
 
 jobs:
