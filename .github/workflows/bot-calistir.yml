@@ -3,7 +3,7 @@ name: Borsa Botu
 on:
   schedule:
     # Her 30 dakikada bir, :05 ve :35'te (UTC 07-15 = TR 10-18), hafta içi
-    - cron: "5,35 7-15 * * 1-5"
+    - cron: "*/15 7-15 * * 1-5"
   workflow_dispatch:
 
 permissions:
