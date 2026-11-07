@@ -32,7 +32,7 @@ ATR_LEN = 14
 ATR_MULT_SL = 1.5
 RR_ORAN = 1.5
 
-INTERVAL = "30m"
+INTERVAL = "15m"
 PERIOD = "1mo"
 
 TZ = ZoneInfo("Europe/Istanbul")
