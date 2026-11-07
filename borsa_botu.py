@@ -1,5 +1,5 @@
 """
-BIST 30 dakikalık AL sinyali botu (kağıt üstü takip sürümü)
+BIST 15 dakikalık AL sinyali botu (kağıt üstü takip sürümü)
 """
 import os
 import sys
