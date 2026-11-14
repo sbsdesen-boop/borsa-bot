@@ -36,7 +36,7 @@ INTERVAL = "15m"
 PERIOD = "1mo"
 
 TZ = ZoneInfo("Europe/Istanbul")
-MUM_SURESI = pd.Timedelta(minutes=30)
+MUM_SURESI = pd.Timedelta(minutes=15)
 LOG_DOSYASI = "signals.csv"
 LOG_KOLONLAR = ["bar_zamani", "sembol", "giris", "sl", "tp", "rsi", "sonuc"]
 
@@ -168,16 +168,21 @@ def strateji_kontrol(sembol):
     bar_zamani = df.index[-1]
 
     trend_yukari = son["Close"] > son["EMA_TREND"]
-    macd_onay = son["MACD"] > son["MACD_SIG"]
+    
+    # MACD HAFİFLETİLDİ: Sadece 0'ın üzerinde olması yeterli (Signal kesişimi aranmıyor)
+    macd_onay = son["MACD"] > 0 
+    
     hacim_onay = son["Volume"] > (son["VOL_SMA"] * VOL_MULT)
     rsi_onay = RSI_ALT < son["RSI"] < RSI_UST
-    ema_kesisim = (onceki["EMA_FAST"] <= onceki["EMA_SLOW"]) and (son["EMA_FAST"] > son["EMA_SLOW"])
+    
+    # KESİŞİM HAFİFLETİLDİ: Sadece hızlı EMA'nın yavaş EMA'nın üzerinde olması yeterli
+    ema_kesisim = son["EMA_FAST"] > son["EMA_SLOW"]
 
     al_sinyali = trend_yukari and macd_onay and hacim_onay and rsi_onay and ema_kesisim
 
     if not al_sinyali:
         print(f"ℹ️ {sembol} sinyal yok. (Trend: {trend_yukari}, MACD: {macd_onay}, "
-              f"Hacim: {hacim_onay}, RSI: {rsi_onay}, Kesişim: {ema_kesisim})")
+              f"Hacim: {hacim_onay}, RSI: {rsi_onay}, Kesisim: {ema_kesisim})")
         return
 
     if pd.isna(son["ATR"]):
@@ -194,7 +199,7 @@ def strateji_kontrol(sembol):
     rsi = round(float(son["RSI"]), 2)
 
     mesaj = (
-        f"⚡ <b>{sembol} 30 DK AL SİNYALİ</b>\n"
+        f"⚡ <b>{sembol} 15 DK AL SİNYALİ</b>\n"
         f"💰 Giriş: {fiyat}\n"
         f"🛑 Stop-Loss: {sl}\n"
         f"🎯 Kâr Al (TP): {tp}\n"
