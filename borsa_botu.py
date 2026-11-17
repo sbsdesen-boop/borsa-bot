@@ -1,5 +1,5 @@
 """
-BIST 15 dakikalık AL sinyali botu (kağıt üstü takip sürümü)
+BIST 15 dakikalık DİP-TEPE (Mean Reversion) AL/SAT sinyali botu
 """
 import os
 import sys
@@ -17,17 +17,11 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 SEMBOLLER = ["SKTAS.IS", "THYAO.IS", "ASELS.IS", "MRGYO.IS"]
 
-FAST_LEN = 5
-SLOW_LEN = 13
-TREND_LEN = 50
+# YENİ STRATEJİ PARAMETRELERİ (DİP-TEPE)
 RSI_LEN = 14
-RSI_ALT = 30
-RSI_UST = 75
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIG = 9
-VOL_LEN = 20
-VOL_MULT = 0.8
+RSI_ALT = 35   # RSI bu seviyenin altına düşerse AL
+RSI_UST = 65   # RSI bu seviyenin üzerine çıkarsa SAT
+
 ATR_LEN = 14
 ATR_MULT_SL = 1.5
 RR_ORAN = 1.5
@@ -38,7 +32,7 @@ PERIOD = "1mo"
 TZ = ZoneInfo("Europe/Istanbul")
 MUM_SURESI = pd.Timedelta(minutes=15)
 LOG_DOSYASI = "signals.csv"
-LOG_KOLONLAR = ["bar_zamani", "sembol", "giris", "sl", "tp", "rsi", "sonuc"]
+LOG_KOLONLAR = ["bar_zamani", "sembol", "islem_yonu", "giris", "sl", "tp", "rsi", "sonuc"]
 
 _veri_onbellek = {}
 
@@ -70,9 +64,6 @@ def telegram_mesaj_gonder(mesaj):
         print(f"❌ Telegram bağlantı hatası: {e}")
 
 # ==================== İNDİKATÖRLER ====================
-def hesapla_ema(series, length):
-    return series.ewm(span=length, adjust=False).mean()
-
 def hesapla_rsi(series, length=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -81,11 +72,6 @@ def hesapla_rsi(series, length=14):
     avg_loss = loss.ewm(com=length - 1, adjust=False).mean()
     rs = avg_gain / (avg_loss + 1e-10)
     return 100 - (100 / (1 + rs))
-
-def hesapla_macd(series, fast=12, slow=26, signal=9):
-    macd_line = hesapla_ema(series, fast) - hesapla_ema(series, slow)
-    signal_line = hesapla_ema(macd_line, signal)
-    return macd_line, signal_line
 
 def hesapla_atr(df, length=14):
     high_low = df["High"] - df["Low"]
@@ -134,14 +120,14 @@ def log_oku():
     log["sonuc"] = log["sonuc"].fillna("")
     return log[LOG_KOLONLAR]
 
-def zaten_gonderildi(sembol, bar_zamani):
+def zaten_gonderildi(sembol, bar_zamani, islem_yonu):
     log = log_oku()
-    return ((log["sembol"] == sembol) & (log["bar_zamani"] == str(bar_zamani))).any()
+    return ((log["sembol"] == sembol) & (log["bar_zamani"] == str(bar_zamani)) & (log["islem_yonu"] == islem_yonu)).any()
 
-def log_ekle(bar_zamani, sembol, giris, sl, tp, rsi):
+def log_ekle(bar_zamani, sembol, islem_yonu, giris, sl, tp, rsi):
     log = log_oku()
     yeni = pd.DataFrame([{
-        "bar_zamani": str(bar_zamani), "sembol": sembol,
+        "bar_zamani": str(bar_zamani), "sembol": sembol, "islem_yonu": islem_yonu,
         "giris": giris, "sl": sl, "tp": tp, "rsi": rsi, "sonuc": "",
     }])
     pd.concat([log, yeni], ignore_index=True).to_csv(LOG_DOSYASI, index=False)
@@ -150,64 +136,63 @@ def log_ekle(bar_zamani, sembol, giris, sl, tp, rsi):
 def strateji_kontrol(sembol):
     print(f"🔍 {sembol} kontrol ediliyor...")
     df = veri_al(sembol)
-    if df is None or len(df) < TREND_LEN + 2:
+    if df is None or len(df) < 30: # RSI için en az 30 mum gerekli
         print(f"⚠️ {sembol} için yeterli veri yok.")
         return
 
     df = df.copy()
-    df["EMA_FAST"] = hesapla_ema(df["Close"], FAST_LEN)
-    df["EMA_SLOW"] = hesapla_ema(df["Close"], SLOW_LEN)
-    df["EMA_TREND"] = hesapla_ema(df["Close"], TREND_LEN)
     df["RSI"] = hesapla_rsi(df["Close"], RSI_LEN)
-    df["MACD"], df["MACD_SIG"] = hesapla_macd(df["Close"], MACD_FAST, MACD_SLOW, MACD_SIG)
-    df["VOL_SMA"] = df["Volume"].rolling(window=VOL_LEN).mean()
     df["ATR"] = hesapla_atr(df, ATR_LEN)
 
     son = df.iloc[-1]
     onceki = df.iloc[-2]
     bar_zamani = df.index[-1]
 
-    trend_yukari = son["Close"] > son["EMA_TREND"]
-    
-    # MACD HAFİFLETİLDİ: Sadece 0'ın üzerinde olması yeterli (Signal kesişimi aranmıyor)
-    macd_onay = son["MACD"] > 0 
-    
-    hacim_onay = son["Volume"] > (son["VOL_SMA"] * VOL_MULT)
-    rsi_onay = RSI_ALT < son["RSI"] < RSI_UST
-    
-    # KESİŞİM HAFİFLETİLDİ: Sadece hızlı EMA'nın yavaş EMA'nın üzerinde olması yeterli
-    ema_kesisim = son["EMA_FAST"] > son["EMA_SLOW"]
-
-    al_sinyali = trend_yukari and macd_onay and hacim_onay and rsi_onay and ema_kesisim
-
-    if not al_sinyali:
-        print(f"ℹ️ {sembol} sinyal yok. (Trend: {trend_yukari}, MACD: {macd_onay}, "
-              f"Hacim: {hacim_onay}, RSI: {rsi_onay}, Kesisim: {ema_kesisim})")
-        return
-
     if pd.isna(son["ATR"]):
         print(f"⚠️ {sembol} ATR hesaplanamadı.")
         return
 
-    if zaten_gonderildi(sembol, bar_zamani):
-        print(f"ℹ️ {sembol} bu mum için sinyal zaten gönderilmiş.")
-        return
-
     fiyat = round(float(son["Close"]), 2)
-    sl = round(fiyat - float(son["ATR"]) * ATR_MULT_SL, 2)
-    tp = round(fiyat + (fiyat - sl) * RR_ORAN, 2)
+    atr = float(son["ATR"])
     rsi = round(float(son["RSI"]), 2)
 
-    mesaj = (
-        f"⚡ <b>{sembol} 15 DK AL SİNYALİ</b>\n"
-        f"💰 Giriş: {fiyat}\n"
-        f"🛑 Stop-Loss: {sl}\n"
-        f"🎯 Kâr Al (TP): {tp}\n"
-        f"📊 RSI: {rsi}\n"
-        f"🕒 Mum: {bar_zamani.strftime('%d.%m %H:%M')} (TR)"
-    )
-    telegram_mesaj_gonder(mesaj)
-    log_ekle(bar_zamani, sembol, fiyat, sl, tp, rsi)
+    # DİP ALIŞ SİNYALİ (RSI 35'in altına düştüğünde)
+    if rsi < RSI_ALT and onceki["RSI"] >= RSI_ALT: # RSI yeni aşağı kesti
+        if not zaten_gonderildi(sembol, bar_zamani, "AL"):
+            sl = round(fiyat - atr * ATR_MULT_SL, 2)
+            tp = round(fiyat + (fiyat - sl) * RR_ORAN, 2)
+            mesaj = (
+                f"🟢 <b>{sembol} DİP ALIŞ SİNYALİ</b>\n"
+                f"💰 Giriş: {fiyat}\n"
+                f"🛑 Stop-Loss: {sl}\n"
+                f"🎯 Kâr Al (TP): {tp}\n"
+                f"📊 RSI: {rsi} (Aşırı Satım)\n"
+                f"🕒 Mum: {bar_zamani.strftime('%d.%m %H:%M')} (TR)"
+            )
+            telegram_mesaj_gonder(mesaj)
+            log_ekle(bar_zamani, sembol, "AL", fiyat, sl, tp, rsi)
+            print(f"✅ {sembol} için AL sinyali üretildi.")
+            return
+
+    # TEPE SATIŞ SİNYALİ (RSI 65'in üzerine çıktığında)
+    if rsi > RSI_UST and onceki["RSI"] <= RSI_UST: # RSI yeni yukarı kesti
+        if not zaten_gonderildi(sembol, bar_zamani, "SAT"):
+            sl = round(fiyat + atr * ATR_MULT_SL, 2)
+            tp = round(fiyat - (sl - fiyat) * RR_ORAN, 2)
+            mesaj = (
+                f"🔴 <b>{sembol} TEPE SATIŞ SİNYALİ</b>\n"
+                f"💰 Giriş: {fiyat}\n"
+                f"🛑 Stop-Loss: {sl}\n"
+                f"🎯 Kâr Al (TP): {tp}\n"
+                f"📊 RSI: {rsi} (Aşırı Alım)\n"
+                f"🕒 Mum: {bar_zamani.strftime('%d.%m %H:%M')} (TR)"
+            )
+            telegram_mesaj_gonder(mesaj)
+            log_ekle(bar_zamani, sembol, "SAT", fiyat, sl, tp, rsi)
+            print(f"✅ {sembol} için SAT sinyali üretildi.")
+            return
+
+    print(f"ℹ️ {sembol} sinyal yok. (RSI: {rsi})")
 
 # ==================== SONUÇ TAKİBİ ====================
 def sonuclari_guncelle():
@@ -224,17 +209,23 @@ def sonuclari_guncelle():
             continue
         giris_zamani = pd.Timestamp(satir["bar_zamani"])
         sl, tp = float(satir["sl"]), float(satir["tp"])
+        islem_yonu = satir["islem_yonu"]
 
         for zaman, mum in df[df.index > giris_zamani].iterrows():
-            sl_oldu = mum["Low"] <= sl
-            tp_oldu = mum["High"] >= tp
+            if islem_yonu == "AL":
+                sl_oldu = mum["Low"] <= sl
+                tp_oldu = mum["High"] >= tp
+            else: # SAT
+                sl_oldu = mum["High"] >= sl
+                tp_oldu = mum["Low"] <= tp
+
             if sl_oldu or tp_oldu:
                 sonuc = "SL" if sl_oldu else "TP"
                 log.at[i, "sonuc"] = sonuc
                 degisti = True
                 emoji = "🛑" if sonuc == "SL" else "🎯"
                 telegram_mesaj_gonder(
-                    f"{emoji} <b>{satir['sembol']}</b> sinyali {sonuc} oldu\n"
+                    f"{emoji} <b>{satir['sembol']}</b> {islem_yonu} sinyali {sonuc} oldu\n"
                     f"Giriş: {satir['giris']} | SL: {satir['sl']} | TP: {satir['tp']}\n"
                     f"Mum: {zaman.strftime('%d.%m %H:%M')} (TR)"
                 )
